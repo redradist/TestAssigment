@@ -114,6 +114,7 @@ int main(int argc, const char *argv[]) {
               try {
                 Autosar::RandomBlockInfo blockInfo{kRandomGenerator.generateIntegerBlock(),
                                                    kRandomGenerator.getBlockSize()};
+                blockInfo.crc32_ = getCRC32(blockInfo.block_, blockInfo.block_size_);
                 blocks.push_back(std::move(blockInfo));
               } catch (...) {
                 decreaseListCount(genCount);
@@ -138,18 +139,8 @@ int main(int argc, const char *argv[]) {
               } else if (hasNextItem) {
                 Autosar::RandomBlockInfo & blockInfo = *frontItem;
                 unsigned long checkSum = getCRC32(blockInfo.block_, blockInfo.block_size_);
-                while (true) {
-                  if (0 == blockInfo.handled_times_.load(std::memory_order::memory_order_acquire)) {
-                    unsigned long initCheckSum = 0;
-                    if (!blockInfo.crc32_.compare_exchange_weak(initCheckSum, checkSum)) {
-                      break;
-                    }
-                  } else {
-                    if (checkSum != blockInfo.crc32_.load(std::memory_order::memory_order_acquire)) {
-                      blockInfo.is_valid_.store(false, std::memory_order::memory_order_release);
-                    }
-                    break;
-                  }
+                if (checkSum != blockInfo.crc32_.load(std::memory_order::memory_order_acquire)) {
+                  blockInfo.is_valid_.store(false, std::memory_order::memory_order_release);
                 }
                 blockInfo.handled_times_.fetch_add(1, std::memory_order::memory_order_acq_rel);
                 frontItem++;
