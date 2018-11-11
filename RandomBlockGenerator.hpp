@@ -26,12 +26,6 @@ struct RandomBlockInfo {
     crc32_.store(_blockInfo.crc32_);
     is_valid_.store(_blockInfo.is_valid_);
   }
-
-  RandomBlockInfo & operator=(RandomBlockInfo&& _block) {
-    block_ = std::move(_block.block_);
-    handled_times_.store(_block.handled_times_);
-    return *this;
-  }
 };
 
 template <typename TRandomNumberType>
