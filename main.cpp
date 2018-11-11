@@ -9,6 +9,7 @@
 #include <mutex>
 
 #include "RandomBlockGenerator.hpp"
+#include "LockList.hpp"
 #include "ScopeOutFile.hpp"
 
 struct ProgramParams {
@@ -101,7 +102,7 @@ int main(int argc, const char *argv[]) {
                                     std::ios::out | std::ios::app | std::ios::ate};
       std::recursive_mutex ioMutex;
       std::atomic<unsigned> genCount{0};
-      std::list<Autosar::RandomBlockInfo> blocks;
+      Autosar::LockList<Autosar::RandomBlockInfo> blocks;
       std::vector<std::thread> aThreads;
       std::vector<std::thread> bThreads;
       const auto & kRandomGenerator = Autosar::RandomBlockGenerator<unsigned>(kParams.blockSize, 0, 100);
@@ -115,7 +116,7 @@ int main(int argc, const char *argv[]) {
                 Autosar::RandomBlockInfo blockInfo{kRandomGenerator.generateIntegerBlock(),
                                                    kRandomGenerator.getBlockSize()};
                 blockInfo.crc32_ = getCRC32(blockInfo.block_, blockInfo.block_size_);
-                blocks.push_back(std::move(blockInfo));
+                blocks.pushBack(std::move(blockInfo));
               } catch (...) {
                 decreaseListCount(genCount);
                 std::lock_guard<std::recursive_mutex> lck{ioMutex};
@@ -128,13 +129,13 @@ int main(int argc, const char *argv[]) {
       for (unsigned i = 0; i < kParams.numberOfBThreads; ++i) {
         bThreads.emplace_back([&] {
           std::atomic<unsigned> handCount{0};
-          bool hasNextItem = !blocks.empty();
+          bool hasNextItem = !blocks.isEmpty();
           auto frontItem = blocks.begin();
           while (true) {
             if (!increaseListCount(handCount, kParams.maxNumBlock)) {
               break;
             } else {
-              if (blocks.empty()) {
+              if (blocks.isEmpty()) {
                 hasNextItem = false;
               } else if (hasNextItem) {
                 Autosar::RandomBlockInfo & blockInfo = *frontItem;
@@ -158,7 +159,7 @@ int main(int argc, const char *argv[]) {
                     static_cast<std::ofstream&>(logFile) << msg.str();
                     std::cerr << msg.str();
                   }
-                  blocks.pop_front();
+                  blocks.popFront();
                 }
               }
             }
