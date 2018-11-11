@@ -10,6 +10,7 @@
 
 #include "RandomBlockGenerator.hpp"
 #include "LockList.hpp"
+#include "LockFreeList.hpp"
 #include "ScopeOutFile.hpp"
 
 struct ProgramParams {
@@ -102,7 +103,7 @@ int main(int argc, const char *argv[]) {
                                     std::ios::out | std::ios::app | std::ios::ate};
       std::recursive_mutex ioMutex;
       std::atomic<unsigned> genCount{0};
-      Autosar::LockList<Autosar::RandomBlockInfo> blocks;
+      Autosar::LockFreeList<Autosar::RandomBlockInfo> blocks;
       std::vector<std::thread> aThreads;
       std::vector<std::thread> bThreads;
       const auto & kRandomGenerator = Autosar::RandomBlockGenerator<unsigned>(kParams.blockSize, 0, 100);
@@ -168,7 +169,8 @@ int main(int argc, const char *argv[]) {
                     static_cast<std::ofstream&>(logFile) << msg.str();
                     std::cerr << msg.str();
                   }
-                  blocks.popFront();
+                  // Commented, because it is hard to implement proper delete item from list
+//                  blocks.popFront();
                 }
               }
             }
