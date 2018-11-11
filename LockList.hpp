@@ -21,22 +21,27 @@ class LockList {
   ~LockList() = default;
 
   iterator begin() {
+    std::lock_guard<std::mutex> lock{mtx_};
     return list_.begin();
   }
 
   const_reference begin() const {
+    std::lock_guard<std::mutex> lock{mtx_};
     return list_.begin();
   }
 
   iterator end() {
+    std::lock_guard<std::mutex> lock{mtx_};
     return list_.end();
   }
 
   const_reference end() const {
+    std::lock_guard<std::mutex> lock{mtx_};
     return list_.end();
   }
 
   bool isEmpty() const {
+    std::lock_guard<std::mutex> lock{mtx_};
     return list_.empty();
   }
 
@@ -56,7 +61,7 @@ class LockList {
   }
 
  private:
-  std::mutex mtx_;
+  mutable std::mutex mtx_;
   std::list<TItem> list_;
 };
 
