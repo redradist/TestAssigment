@@ -6,10 +6,11 @@
 
 #include <boost/program_options.hpp>
 #include <boost/crc.hpp>
+#include <boost/lockfree/queue.hpp>
 #include <mutex>
 
 #include "RandomBlockGenerator.hpp"
-#include "LockList.hpp"
+#include "ActiveObject.hpp"
 #include "ScopeOutFile.hpp"
 
 struct ProgramParams {
@@ -102,10 +103,48 @@ int main(int argc, const char *argv[]) {
                                     std::ios::out | std::ios::app | std::ios::ate};
       std::recursive_mutex ioMutex;
       std::atomic<unsigned> genCount{0};
-      Autosar::LockList<Autosar::RandomBlockInfo> blocks;
+      std::vector<std::unique_ptr<Autosar::ActiveObject>> objects;
       std::vector<std::thread> aThreads;
       std::vector<std::thread> bThreads;
       const auto & kRandomGenerator = Autosar::RandomBlockGenerator<unsigned>(kParams.blockSize, 0, 100);
+      for (unsigned numB = 0; numB < kParams.numberOfBThreads; ++numB) {
+        objects.push_back(std::move(std::make_unique<Autosar::ActiveObject>(kParams.maxNumBlock)));
+      }
+      for (unsigned numB = 0; numB < kParams.numberOfBThreads; ++numB) {
+        bThreads.emplace_back([&, numB] {
+          std::atomic<unsigned> handCount{0};
+          while (true) {
+            if (!increaseListCount(handCount, kParams.maxNumBlock)) {
+              break;
+            } else {
+              Autosar::RandomBlockInfo * blockInfoPtr;
+              objects[numB]->pop(blockInfoPtr);
+              if (blockInfoPtr != nullptr) {
+                unsigned long checkSum = getCRC32(blockInfoPtr->block_, blockInfoPtr->block_size_);
+                if (checkSum != blockInfoPtr->crc32_.load(std::memory_order::memory_order_acquire)) {
+                  blockInfoPtr->is_valid_.store(false, std::memory_order::memory_order_release);
+                }
+                blockInfoPtr->handled_times_.fetch_add(1, std::memory_order::memory_order_acq_rel);
+                if (kParams.numberOfBThreads == blockInfoPtr->handled_times_.load(std::memory_order::memory_order_acquire)) {
+                  if (!blockInfoPtr->is_valid_.load(std::memory_order_acquire)) {
+                    std::stringstream msg;
+                    msg << "CRC32 is not matched for block:" << std::endl;
+                    msg << "  ";
+                    for (unsigned i = 0; i < blockInfoPtr->block_size_; ++i) {
+                      msg << std::hex << blockInfoPtr->block_[i];
+                    }
+                    msg << std::endl;
+                    std::lock_guard<std::recursive_mutex> lck{ioMutex};
+                    static_cast<std::ofstream&>(logFile) << msg.str();
+                    std::cerr << msg.str();
+                  }
+                  delete blockInfoPtr;
+                }
+              }
+            }
+          }
+        });
+      }
       for (unsigned i = 0; i < kParams.numberOfAThreads; ++i) {
         aThreads.emplace_back([&] {
           while (true) {
@@ -113,54 +152,16 @@ int main(int argc, const char *argv[]) {
               break;
             } else {
               try {
-                Autosar::RandomBlockInfo blockInfo{kRandomGenerator.generateIntegerBlock(),
-                                                   kRandomGenerator.getBlockSize()};
-                blockInfo.crc32_ = getCRC32(blockInfo.block_, blockInfo.block_size_);
-                blocks.pushBack(std::move(blockInfo));
+                auto blockInfoPtr = new Autosar::RandomBlockInfo(kRandomGenerator.generateIntegerBlock(),
+                                                                 kRandomGenerator.getBlockSize());
+                blockInfoPtr->crc32_ = getCRC32(blockInfoPtr->block_, blockInfoPtr->block_size_);
+                for (auto & object : objects) {
+                  object->push(blockInfoPtr);
+                }
               } catch (...) {
                 decreaseListCount(genCount);
                 std::lock_guard<std::recursive_mutex> lck{ioMutex};
                 std::cerr << "Exception was caught !!" << std::endl;
-              }
-            }
-          }
-        });
-      }
-      for (unsigned i = 0; i < kParams.numberOfBThreads; ++i) {
-        bThreads.emplace_back([&] {
-          std::atomic<unsigned> handCount{0};
-          bool hasNextItem = !blocks.isEmpty();
-          auto frontItem = blocks.begin();
-          while (true) {
-            if (!increaseListCount(handCount, kParams.maxNumBlock)) {
-              break;
-            } else {
-              if (blocks.isEmpty()) {
-                hasNextItem = false;
-              } else if (hasNextItem) {
-                Autosar::RandomBlockInfo & blockInfo = *frontItem;
-                unsigned long checkSum = getCRC32(blockInfo.block_, blockInfo.block_size_);
-                if (checkSum != blockInfo.crc32_.load(std::memory_order::memory_order_acquire)) {
-                  blockInfo.is_valid_.store(false, std::memory_order::memory_order_release);
-                }
-                blockInfo.handled_times_.fetch_add(1, std::memory_order::memory_order_acq_rel);
-                frontItem++;
-                hasNextItem = frontItem != blocks.end();
-                if (kParams.numberOfBThreads == blockInfo.handled_times_.load(std::memory_order::memory_order_acquire)) {
-                  if (!blockInfo.is_valid_.load(std::memory_order_acquire)) {
-                    std::stringstream msg;
-                    msg << "CRC32 is not matched for block:" << std::endl;
-                    msg << "  ";
-                    for (unsigned i = 0; i < blockInfo.block_size_; ++i) {
-                      msg << std::hex << blockInfo.block_[i];
-                    }
-                    msg << std::endl;
-                    std::lock_guard<std::recursive_mutex> lck{ioMutex};
-                    static_cast<std::ofstream&>(logFile) << msg.str();
-                    std::cerr << msg.str();
-                  }
-                  blocks.popFront();
-                }
               }
             }
           }
