@@ -119,37 +119,35 @@ int main(int argc, const char *argv[]) {
             } else {
               Autosar::RandomBlockInfo * blockInfoPtr;
               objects[numB]->pop(blockInfoPtr);
-              if (blockInfoPtr != nullptr) {
-                unsigned long checkSum = getCRC32(blockInfoPtr->block_, blockInfoPtr->block_size_);
-                while (true) {
-                  if (0 == blockInfoPtr->handled_times_.load(std::memory_order::memory_order_acquire)) {
-                    unsigned long initCheckSum = 0;
-                    if (!blockInfoPtr->crc32_.compare_exchange_weak(initCheckSum, checkSum)) {
-                      break;
-                    }
-                  } else {
-                    if (checkSum != blockInfoPtr->crc32_.load(std::memory_order::memory_order_acquire)) {
-                      blockInfoPtr->is_valid_.store(false, std::memory_order::memory_order_release);
-                    }
+              unsigned long checkSum = getCRC32(blockInfoPtr->block_, blockInfoPtr->block_size_);
+              while (true) {
+                if (0 == blockInfoPtr->handled_times_.load(std::memory_order::memory_order_acquire)) {
+                  unsigned long initCheckSum = 0;
+                  if (!blockInfoPtr->crc32_.compare_exchange_weak(initCheckSum, checkSum)) {
                     break;
                   }
-                }
-                blockInfoPtr->handled_times_.fetch_add(1, std::memory_order::memory_order_acq_rel);
-                if (kParams.numberOfBThreads == blockInfoPtr->handled_times_.load(std::memory_order::memory_order_acquire)) {
-                  if (!blockInfoPtr->is_valid_.load(std::memory_order_acquire)) {
-                    std::stringstream msg;
-                    msg << "CRC32 is not matched for block:" << std::endl;
-                    msg << "  ";
-                    for (unsigned i = 0; i < blockInfoPtr->block_size_; ++i) {
-                      msg << std::hex << blockInfoPtr->block_[i];
-                    }
-                    msg << std::endl;
-                    std::lock_guard<std::recursive_mutex> lck{ioMutex};
-                    static_cast<std::ofstream&>(logFile) << msg.str();
-                    std::cerr << msg.str();
+                } else {
+                  if (checkSum != blockInfoPtr->crc32_.load(std::memory_order::memory_order_acquire)) {
+                    blockInfoPtr->is_valid_.store(false, std::memory_order::memory_order_release);
                   }
-                  delete blockInfoPtr;
+                  break;
                 }
+              }
+              blockInfoPtr->handled_times_.fetch_add(1, std::memory_order::memory_order_acq_rel);
+              if (kParams.numberOfBThreads == blockInfoPtr->handled_times_.load(std::memory_order::memory_order_acquire)) {
+                if (!blockInfoPtr->is_valid_.load(std::memory_order_acquire)) {
+                  std::stringstream msg;
+                  msg << "CRC32 is not matched for block:" << std::endl;
+                  msg << "  ";
+                  for (unsigned i = 0; i < blockInfoPtr->block_size_; ++i) {
+                    msg << std::hex << blockInfoPtr->block_[i];
+                  }
+                  msg << std::endl;
+                  std::lock_guard<std::recursive_mutex> lck{ioMutex};
+                  static_cast<std::ofstream&>(logFile) << msg.str();
+                  std::cerr << msg.str();
+                }
+                delete blockInfoPtr;
               }
             }
           }

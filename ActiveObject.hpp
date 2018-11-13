@@ -25,7 +25,7 @@ class ActiveObject {
   }
 
   void pop(Autosar::RandomBlockInfo *& _blockInfo) {
-    if (queue.empty() || !queue.pop(_blockInfo)) {
+    while (queue.empty() || !queue.pop(_blockInfo)) {
       std::unique_lock<std::mutex> lock{mutex_};
       queue_var_.wait(lock, [=] {
         return !queue.empty();
