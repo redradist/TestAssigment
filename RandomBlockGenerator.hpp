@@ -10,21 +10,30 @@ namespace Autosar {
 struct RandomBlockInfo {
   std::unique_ptr<unsigned[]> block_;
   const unsigned block_size_;
-  std::atomic<unsigned> handled_times_{0};
   std::atomic<unsigned long> crc32_{0};
+  std::atomic<unsigned> handled_times_{0};
+  const unsigned limit_handled_times_;
   std::atomic<bool> is_valid_{true};
 
   RandomBlockInfo(std::unique_ptr<unsigned[]> _block,
-                  const unsigned _blockSize)
+                  const unsigned _blockSize,
+                  const unsigned _handledTimes)
       : block_{std::move(_block)}
-      , block_size_{_blockSize} {
+      , block_size_{_blockSize}
+      , limit_handled_times_{_handledTimes} {
   }
   RandomBlockInfo(RandomBlockInfo&& _blockInfo)
       : block_{std::move(_blockInfo.block_)}
-      , block_size_{_blockInfo.block_size_} {
+      , block_size_{_blockInfo.block_size_}
+      , limit_handled_times_{_blockInfo.limit_handled_times_} {
     handled_times_.store(_blockInfo.handled_times_);
     crc32_.store(_blockInfo.crc32_);
     is_valid_.store(_blockInfo.is_valid_);
+  }
+
+  bool isReclaimNeeded() const {
+    return 0 == limit_handled_times_ ||
+           (limit_handled_times_ - 1) <= handled_times_.load(std::memory_order::memory_order_acquire);
   }
 };
 
