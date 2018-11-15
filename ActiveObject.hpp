@@ -20,7 +20,7 @@ class ActiveObject {
   }
 
   void push(Autosar::RandomBlockInfo * _blockInfoPtr) {
-    queue.push(_blockInfoPtr);
+    queue.bounded_push(_blockInfoPtr);
     queue_var_.notify_one();
   }
 
