@@ -124,7 +124,9 @@ int main(int argc, const char *argv[]) {
               if (checkSum != blockInfoPtr->crc32_.load(std::memory_order::memory_order_acquire)) {
                 blockInfoPtr->is_valid_.store(false, std::memory_order::memory_order_release);
               }
-              if (blockInfoPtr->isReclaimNeeded()) {
+              if (!blockInfoPtr->isReclaimNeeded()) {
+                blockInfoPtr->handled_times_.fetch_add(1, std::memory_order::memory_order_acq_rel);
+              } else {
                 blockInfoPtr->handled_times_.fetch_add(1, std::memory_order::memory_order_acq_rel);
                 if (!blockInfoPtr->is_valid_.load(std::memory_order_acquire)) {
                   std::stringstream msg;
@@ -139,8 +141,6 @@ int main(int argc, const char *argv[]) {
                   std::cerr << msg.str();
                 }
                 delete blockInfoPtr;
-              } else {
-                blockInfoPtr->handled_times_.fetch_add(1, std::memory_order::memory_order_acq_rel);
               }
             }
           }
