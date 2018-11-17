@@ -1,6 +1,7 @@
 #ifndef AUTOSAR_COMPONENT_HPP
 #define AUTOSAR_COMPONENT_HPP
 
+#include <functional>
 #include <mutex>
 #include <thread>
 #include <condition_variable>
@@ -20,17 +21,18 @@ class ActiveObject {
   }
 
   void push(Autosar::RandomBlockInfo * _blockInfoPtr) {
-    queue.bounded_push(_blockInfoPtr);
+    queue.push(_blockInfoPtr);
     queue_var_.notify_one();
   }
 
-  void pop(Autosar::RandomBlockInfo *& _blockInfo) {
-    while (queue.empty() || !queue.pop(_blockInfo)) {
+  void pop(Autosar::RandomBlockInfo *& _blockInfoPtr) {
+    while (queue.empty() || !queue.pop(_blockInfoPtr)) {
       std::unique_lock<std::mutex> lock{mutex_};
-      queue_var_.wait(lock, [=] {
+      queue_var_.wait(lock, [this] {
         return !queue.empty();
       });
     }
+    assert(_blockInfoPtr != nullptr);
   }
 
  private:

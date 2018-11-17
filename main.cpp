@@ -7,11 +7,12 @@
 #include <boost/program_options.hpp>
 #include <boost/crc.hpp>
 #include <boost/lockfree/queue.hpp>
+#include <boost/format.hpp>
 #include <mutex>
 
 #include "RandomBlockGenerator.hpp"
 #include "ActiveObject.hpp"
-#include "ScopeOutFile.hpp"
+#include "Logger.hpp"
 
 struct ProgramParams {
   unsigned numberOfAThreads = 0;
@@ -53,17 +54,17 @@ ProgramParams parseArguments(const boost::program_options::variables_map & _args
   return params;
 }
 
-bool increaseListCount(std::atomic<unsigned> & _listCount, const unsigned & _limit) {
+bool tryIncreaseListCount(std::atomic<unsigned> & _listCount, const unsigned & _limit) {
   unsigned listSize;
   bool succeed = false;
   do {
     listSize = _listCount.load(std::memory_order::memory_order_acquire);
-  } while ((listSize + 1) < _limit &&
+  } while ((listSize + 1) <= _limit &&
            !(succeed = _listCount.compare_exchange_strong(listSize, listSize + 1, std::memory_order::memory_order_acq_rel)));
   return succeed;
 }
 
-bool decreaseListCount(std::atomic<unsigned> & _listCount) {
+bool tryDecreaseListCount(std::atomic<unsigned> & _listCount) {
   unsigned listSize;
   bool succeed = false;
   do {
@@ -99,9 +100,7 @@ int main(int argc, const char *argv[]) {
       std::cout << desc << std::endl;
     } else {
       const ProgramParams kParams = parseArguments(vm);
-      Autosar::ScopeOutFile logFile{"./out_log.txt",
-                                    std::ios::out | std::ios::app | std::ios::ate};
-      std::recursive_mutex ioMutex;
+      Autosar::Logger logger{"./out_log.txt"};
       std::atomic<unsigned> genCount{0};
       std::vector<std::unique_ptr<Autosar::ActiveObject>> objects;
       std::vector<std::thread> aThreads;
@@ -112,36 +111,22 @@ int main(int argc, const char *argv[]) {
       }
       for (unsigned numB = 0; numB < kParams.numberOfBThreads; ++numB) {
         bThreads.emplace_back([&, numB] {
-          std::atomic<unsigned> handCount{0};
-          while (true) {
-            if (!increaseListCount(handCount, kParams.maxNumBlock)) {
-              break;
+          for (unsigned handCount = 0; handCount < kParams.maxNumBlock; ++handCount) {
+            Autosar::RandomBlockInfo * blockInfoPtr;
+            objects[numB]->pop(blockInfoPtr);
+            const unsigned long kCheckSum = getCRC32(blockInfoPtr->block_, blockInfoPtr->block_size_);
+            if (kCheckSum != blockInfoPtr->crc32_.load(std::memory_order::memory_order_acquire)) {
+              blockInfoPtr->is_valid_.store(false, std::memory_order::memory_order_release);
+            }
+            if (not blockInfoPtr->isReclaimNeeded()) {
+              blockInfoPtr->handled_times_.fetch_add(1, std::memory_order::memory_order_acq_rel);
             } else {
-              Autosar::RandomBlockInfo * blockInfoPtr;
-              objects[numB]->pop(blockInfoPtr);
-              assert(blockInfoPtr != nullptr);
-              unsigned long checkSum = getCRC32(blockInfoPtr->block_, blockInfoPtr->block_size_);
-              if (checkSum != blockInfoPtr->crc32_.load(std::memory_order::memory_order_acquire)) {
-                blockInfoPtr->is_valid_.store(false, std::memory_order::memory_order_release);
+              blockInfoPtr->handled_times_.fetch_add(1, std::memory_order::memory_order_acq_rel);
+              if (!blockInfoPtr->is_valid_.load(std::memory_order_acquire)) {
+                const std::string kBlockMsg = blockInfoPtr->toString();
+                logger.error((boost::format("CRC32 is not matched for block: {}") % kBlockMsg).str());
               }
-              if (!blockInfoPtr->isReclaimNeeded()) {
-                blockInfoPtr->handled_times_.fetch_add(1, std::memory_order::memory_order_acq_rel);
-              } else {
-                blockInfoPtr->handled_times_.fetch_add(1, std::memory_order::memory_order_acq_rel);
-                if (!blockInfoPtr->is_valid_.load(std::memory_order_acquire)) {
-                  std::stringstream msg;
-                  msg << "CRC32 is not matched for block:" << std::endl;
-                  msg << "  ";
-                  for (unsigned i = 0; i < blockInfoPtr->block_size_; ++i) {
-                    msg << std::hex << blockInfoPtr->block_[i];
-                  }
-                  msg << std::endl;
-                  std::lock_guard<std::recursive_mutex> lck{ioMutex};
-                  static_cast<std::ofstream&>(logFile) << msg.str();
-                  std::cerr << msg.str();
-                }
-                delete blockInfoPtr;
-              }
+              delete blockInfoPtr;
             }
           }
         });
@@ -149,7 +134,7 @@ int main(int argc, const char *argv[]) {
       for (unsigned i = 0; i < kParams.numberOfAThreads; ++i) {
         aThreads.emplace_back([&] {
           while (true) {
-            if (!increaseListCount(genCount, kParams.maxNumBlock)) {
+            if (!tryIncreaseListCount(genCount, kParams.maxNumBlock)) {
               break;
             } else {
               try {
@@ -161,9 +146,8 @@ int main(int argc, const char *argv[]) {
                   object->push(blockInfoPtr);
                 }
               } catch (...) {
-                decreaseListCount(genCount);
-                std::lock_guard<std::recursive_mutex> lck{ioMutex};
-                std::cerr << "Exception was caught !!" << std::endl;
+                tryDecreaseListCount(genCount);
+                logger.error("Exception was caught !!");
               }
             }
           }

@@ -1,6 +1,7 @@
 #ifndef AUTOSAR_RANDOM_BLOCK_GENERATOR_HPP
 #define AUTOSAR_RANDOM_BLOCK_GENERATOR_HPP
 
+#include <sstream>
 #include <random>
 #include <memory>
 #include <atomic>
@@ -35,6 +36,14 @@ struct RandomBlockInfo {
     return 0 == limit_handled_times_ ||
            (limit_handled_times_ - 1) <= handled_times_.load(std::memory_order::memory_order_acquire);
   }
+
+  std::string toString() const {
+    std::stringstream msg;
+    for (unsigned i = 0; i < block_size_; ++i) {
+      msg << std::hex << block_[i];
+    }
+    return msg.str();
+  }
 };
 
 template <typename TRandomNumberType>
@@ -53,7 +62,7 @@ class RandomBlockGenerator {
     std::mt19937 mt(rd());
     std::uniform_int_distribution<TRandomNumberType> dist(lower_bound_, upper_bound_);
     auto randBlock = std::make_unique<TRandomNumberType[]>(size_);
-      for (unsigned i = 0; i < size_; ++i) {
+    for (unsigned i = 0; i < size_; ++i) {
       randBlock[i] = dist(mt);
     }
     return randBlock;
@@ -63,7 +72,7 @@ class RandomBlockGenerator {
     std::random_device rd;
     std::mt19937 mt(rd());
     std::uniform_real_distribution<TRandomNumberType> dist(lower_bound_, upper_bound_);
-    auto randBlock = std::make_unique<TRandomNumberType[]>(new TRandomNumberType[size_]);
+    auto randBlock = std::make_unique<TRandomNumberType[]>(size_);
     for (unsigned i = 0; i < size_; ++i) {
       randBlock[i] = dist(mt);
     }

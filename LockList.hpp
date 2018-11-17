@@ -25,7 +25,7 @@ class LockList {
     return list_.begin();
   }
 
-  const_reference begin() const {
+  const_iterator begin() const {
     std::lock_guard<std::mutex> lock{mtx_};
     return list_.begin();
   }
@@ -35,7 +35,7 @@ class LockList {
     return list_.end();
   }
 
-  const_reference end() const {
+  const_iterator end() const {
     std::lock_guard<std::mutex> lock{mtx_};
     return list_.end();
   }
